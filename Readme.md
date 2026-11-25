@@ -1,120 +1,40 @@
-# Minecraft 轻量级自动挂机机器人 (AFK Bot)
+# mc-client-worker
 
-这是一个基于 [Mineflayer](https://github.com/PrismarineJS/mineflayer) 精简改造的 Node.js 挂机机器人，专为免费游戏服务器（如 FreeGameHost、Aternos 等）设计，用于防止服务器因长时间无玩家在线而自动休眠。
+一个专为**低配容器与受限磁盘环境**设计的轻量级 Minecraft 挂机机器人（基于 Mineflayer）。项目采用「零预装依赖 + 运行时流式瘦身引导」架构，内置拟人化防检测行为、地形安全防护与智能断线重连机制。
 
-针对 **Silly Development (512 MiB 磁盘)**、**ACLClouds (715 MiB 磁盘)** 等低配免费托管容器进行了极致精简，移除了网页后台与寻路模块，仅保留核心连接、自动重连与基础防踢功能。
+## 核心特性
 
----
+### 1. 极简运行环境与依赖瘦身（Bootstrap v5）
+- **零预装依赖**：`package.json` 无需声明重型依赖，首次启动由 `index.js` 自动完成运行时构建，重启后通过 `runtime/.ready` 缓存标记秒级跳过。
+- **流式裁剪 `minecraft-data`**：通过原生的 TCP Ping 自动探测目标服务器版本，流式下载并仅解压所需版本的数据（默认保留 `1.21.4`、`1.21.6`、`1.21.10`、`1.21.11`、`26.3`、最新正式版及目标探测版本），彻底跳过 Bedrock 数据、测试及文档文件，大幅压缩磁盘占用。
+- **绕过受限 `/tmp` 分区**：将 npm 缓存与临时目录完全重定向至项目 `runtime/` 目录下，安装结束后自动清理缓存并修剪 `node_modules` 中的 `.map`、`.d.ts`、`.md` 等冗余文件，适配仅 32MB `/tmp` 的免费面板容器。
 
-## ✨ 核心特性
+### 2. 拟人化防检测行为
+- **平滑视角转动**：采用缓动曲线（Ease-In-Out）分段转头并加入微小随机抖动，模拟真实鼠标操作。
+- **安全范围随机漫步**：以进服/重生位置为锚点，在限定半径内随机走动、偶发疾跑/侧移/跳跃；移动前自动检测前方及脚下两格方块，避开岩浆、火焰、仙人掌、岩浆块、甜浆果丛、营火、水源与深坑。
+- **多维度日常动作**：按非均匀随机间隔（含短时连贯操作与长时发呆停顿）执行环顾四周、注视 8 格内的玩家/生物、短暂潜行、切换快捷栏与挥手动作。
+- **生存辅助**：饥饿值低于 `16` 时自动从背包寻找并食用食物；落水时自动触发上浮跳跃防止溺水。
 
-- **极简依赖**：仅保留 `mineflayer` 核心库，大幅降低内存与磁盘占用。
-- **断线自动重连**：内置指数退避重连机制（默认 5 秒起，最高 60 秒封顶，附带随机抖动），支持自动唤醒休眠中的服务器。
-- **轻量防踢 (Anti-AFK)**：每 25 秒自动执行随机转头与挥手动作，不易触发服务器反作弊插件。
-- **自动适配版本**：支持留空版本号自动识别目标 Minecraft 服务器版本。
-- **可选自动登录**：支持在配置中开启 `/login` 自动验证（适用于安装了 AuthMe 等登录插件的服务器）。
-
----
-
-## 📁 项目文件结构
-
-部署时只需保留以下核心文件即可：
-
-```text
-.
-├── index.js        # 机器人主程序（连接、防踢、自动重连）
-├── package.json    # 项目依赖声明（仅 mineflayer）
-├── settings.json   # 服务器地址、端口与机器人账号配置
-└── .npmrc          # 将 npm 缓存导向 /tmp，防止撑爆免费容器磁盘
-```
+### 3. 会话轮换与高可用重连
+- **定时下线休息**：支持配置随机在线时长，到达后主动退出服务器并在短时间内重新上线，模拟真实玩家作息。
+- **智能重连策略**：内置 90 秒登录看门狗、指数退避重连（附带随机抖动），并能自动识别连接限流提示（如 `throttled` / `wait` / `too fast`）延长等待时间至 60–100 秒。
 
 ---
 
-## ⚙️ 快速配置
+## 环境要求
 
-### 1. 修改 `settings.json`
-
-根据你的服务器信息修改 `settings.json`：
-
-```json
-{
-  "bot-account": {
-    "username": "SoloCloudHosting",
-    "password": "",
-    "type": "offline"
-  },
-  "server": {
-    "ip": "eu3.freegamehost.xyz",
-    "port": 25937,
-    "version": ""
-  },
-  "utils": {
-    "auto-auth": {
-      "enabled": false,
-      "password": "YourPassword"
-    },
-    "auto-reconnect-delay": 5000,
-    "max-reconnect-delay": 60000
-  }
-}
-```
-
-**配置项说明：**
-- `bot-account.username`：机器人在游戏内显示的 ID。
-- `server.ip` 与 `server.port`：**强烈建议直接填写解析后的节点地址与真实端口**（例如 `eu3.freegamehost.xyz` 和 `25937`）。因为 Mineflayer 传入端口号时会跳过 SRV DNS 解析，直接填无端口子域名可能导致无法连接。
-- `server.version`：留空 `""` 即可自动匹配服务器版本；如遇特殊核心可手动指定（如 `"1.20.1"`）。
-- `utils.auto-auth.enabled`：若服务器装有登录插件则改为 `true` 并填写密码，否则保持 `false`。
-
-### 2. FreeGameHost / MC 服务端设置
-
-为了让离线模式机器人顺利进服且不被踢出，请在游戏服务器面板中完成以下设置并**重启服务器**：
-
-1. **开启离线模式（允许非正版玩家）**：
-   - 在面板 `Minecraft -> Properties` 中开启 **Allow cracked / non-premium players**；
-   - 或在 `server.properties` 中修改为 `online-mode=false`。
-2. **关闭挂机踢出**：
-   - 将 **AFK kick (minutes)** 设置为 `0`。
-3. **安全建议**：关闭正版验证后，建议开启白名单（Whitelist）并将机器人 ID 加入白名单，或安装登录插件保护存档安全。
+- **Node.js**：`>= 18.0.0`（依赖原生 `fetch`、`Readable.fromWeb` 与 `AbortSignal.timeout`）
+- **网络**：首次启动需访问 `registry.npmjs.org` 及 `cdn.jsdelivr.net` / `unpkg.com` 拉取依赖
 
 ---
 
-## 🚀 免费低配容器防爆盘指南
+## 快速开始
 
-在 **Silly Development (512 MiB)** 等磁盘配额较小的容器中，首次执行 `npm install` 时容易因为缓存和全版本协议数据触发磁盘超限（`ENOSPC` / `Out of disk space`）。请按以下步骤优化：
+1. 克隆或上传项目文件（`index.js`、`package.json`、`settings.json`）至运行目录。
+2. 编辑 `settings.json`，填入目标服务器地址与机器人账号信息。
+3. 启动程序：
 
-1. **添加 `.npmrc` 转移缓存**  
-   在项目根目录新建 `.npmrc` 文件，写入以下内容，避免每次重启都在根目录生成 `.npm` 缓存目录：
-   ```ini
-   cache=/tmp/.npm
-   audit=false
-   fund=false
-   ```
-   *(若使用 ACLClouds，还可在 Startup 环境变量中添加 `npm_config_cache=/tmp/.npm` 与 `npm_config_omit=optional`。)*
-
-2. **清理根目录残留缓存**  
-   安装完成后，若根目录存在 `.npm` 文件夹，直接将其删除即可释放约 50 MB 空间。
-
-3. **裁剪无用的基岩版数据（可释放 100+ MB）**  
-   如果仅连接 Java 版服务器，可进入以下目录：
-   ```text
-   node_modules/minecraft-data/minecraft-data/data/bedrock/
-   ```
-   删除里面带版本号的文件夹（如 `1.20.x`、`1.21.x` 等）。  
-   > ⚠️ **注意**：务必保留该目录下的 `common` 文件夹，否则程序启动会报错。
-
----
-
-## 🔧 常见问题排查
-
-| 报错信息 | 原因 | 解决方法 |
-| :--- | :--- | :--- |
-| `Failed to verify username!` / `unverified_username` | MC 服务器开启了正版验证，拒绝了离线机器人 | 在服务端开启 `Allow cracked players`（`online-mode=false`）并重启服务器 |
-| `ENOSPC: no space left on device` / `out of disk space` | 容器磁盘配额已满 | 删除 `.npm` 缓存、添加 `.npmrc`，并删除 `minecraft-data` 中的基岩版版本文件夹 |
-| `Error: connect ETIMEDOUT` | 目标地址/端口填错，或机房跨区防火墙丢包 | 核对节点 IP 与端口；确保服务器已开启或域名可正常触发唤醒 |
-| `Kicked: Server start command issued. Please wait...` | 机器人成功触发了 FreeGameHost 自动唤醒 | 正常现象，等待 1 分钟左右机器人会自动重连并进服 |
-
----
-
-## 📄 开源协议
-
-本项目基于 [MIT License](https://opensource.org/licenses/MIT) 开源。
+```bash
+npm start
+# 或直接运行
+node index.js
