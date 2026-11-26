@@ -5,9 +5,9 @@
     "type": "offline"
   },
   "server": {
-    "ip": "ss2.seedloaf.gg",
-    "port": 55230,
-    "version": ""
+    "ip": "join.wrd.kr",
+    "port": 25791,
+    "version": "1.21.4"
   },
   "behavior": {
     "session": {
