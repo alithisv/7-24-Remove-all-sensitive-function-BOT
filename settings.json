@@ -7,7 +7,7 @@
   "server": {
     "ip": "join.wrd.kr",
     "port": 25791,
-    "version": "1.21.4"
+    "version": ""
   },
   "behavior": {
     "session": {
