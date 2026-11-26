@@ -15,7 +15,7 @@ const READY_FLAG = path.join(RUNTIME_DIR, ".ready");
 const KEEP_MC_VERSIONS = ["1.21.4", "1.21.6", "1.21.10", "1.21.11", "26.3"];
 const RUNTIME_SIGNATURE = `v5:${KEEP_MC_VERSIONS.join(",")},latest`;
 
-// ==================== 第一部分：轻量级自适应依赖引导（v5） ====================
+// ==================== 第一部分：轻量级自适应依赖引导 ====================
 
 function logDiskSpace() {
   if (typeof fs.statfsSync !== "function") return;
@@ -138,12 +138,10 @@ async function buildAllowedPcDirs(mcDataVersion, targetVersion) {
   const pcKeys = Object.keys(dataPaths.pc);
   const keepVersions = new Set();
 
-  // 1. 保留指定版本列表：1.21.4、1.21.6、1.21.10、1.21.11、26.3
   for (const v of KEEP_MC_VERSIONS) {
     if (dataPaths.pc[v]) keepVersions.add(v);
   }
 
-  // 2. 保留最新正式版
   const releaseKeys = pcKeys.filter((k) => /^\d+\.\d+(?:\.\d+)?$/.test(k));
   if (releaseKeys.length) {
     keepVersions.add(releaseKeys[releaseKeys.length - 1]);
@@ -151,7 +149,6 @@ async function buildAllowedPcDirs(mcDataVersion, targetVersion) {
     keepVersions.add(pcKeys[pcKeys.length - 1]);
   }
 
-  // 3. 若配置或探测到其他精确版本，一并保留兜底
   if (targetVersion && dataPaths.pc[targetVersion]) {
     keepVersions.add(targetVersion);
   }
@@ -400,7 +397,7 @@ async function ensureRuntime() {
     return require(path.join(RUNTIME_DIR, "node_modules", "mineflayer"));
   }
 
-  console.log("[Init] 引导脚本 v5 启动，开始执行瘦身依赖安装...");
+  console.log("[Init] 引导脚本启动，开始执行瘦身依赖安装...");
   logDiskSpace();
 
   fs.rmSync(RUNTIME_DIR, { recursive: true, force: true });
@@ -418,7 +415,6 @@ async function ensureRuntime() {
   console.log(`[Init] 正在流式下载并瘦身 minecraft-data@${meta.version}...`);
   await downloadAndExtractSlimMcData(meta.dist.tarball, SLIM_MC_DATA_DIR, allowedPcDirs);
 
-  // 移除 slim-mc-data 中的构建脚本，避免 npm 重新扫描已删除的旧版本目录
   const slimPkgPath = path.join(SLIM_MC_DATA_DIR, "package.json");
   if (fs.existsSync(slimPkgPath)) {
     const slimPkg = JSON.parse(fs.readFileSync(slimPkgPath, "utf8"));
@@ -439,7 +435,6 @@ async function ensureRuntime() {
   };
   fs.writeFileSync(path.join(RUNTIME_DIR, "package.json"), JSON.stringify(runtimePkg, null, 2));
 
-  // 缓存与临时目录全部放到 /app/runtime 内，完全绕开 32MB 的 /tmp
   const npmCacheDir = path.join(RUNTIME_DIR, ".npm-cache");
   const npmTmpDir = path.join(RUNTIME_DIR, ".npm-tmp");
   fs.mkdirSync(npmCacheDir, { recursive: true });
@@ -486,9 +481,7 @@ async function ensureRuntime() {
       }
     );
 
-    if (res.error) {
-      throw res.error;
-    }
+    if (res.error) throw res.error;
     if (res.status !== 0) {
       dumpNpmDebugLog(npmCacheDir);
       throw new Error(`npm install 失败，退出码: ${res.status}`);
@@ -506,7 +499,7 @@ async function ensureRuntime() {
   return require(path.join(RUNTIME_DIR, "node_modules", "mineflayer"));
 }
 
-// ==================== 第二部分：挂机机器人与拟人防检测核心 ====================
+// ==================== 第二部分：防非法移动包挂机核心 ====================
 
 function startBotApp(mineflayer) {
   let bot = null;
@@ -555,6 +548,8 @@ function startBotApp(mineflayer) {
   };
 
   const isBotReady = () => Boolean(bot && bot.entity && bot.entity.position);
+  const isMovementEnabled = () =>
+    !(config.behavior && config.behavior.movement && config.behavior.movement.enabled === false);
 
   const resetControls = () => {
     if (!bot || typeof bot.setControlState !== "function") return;
@@ -572,11 +567,18 @@ function startBotApp(mineflayer) {
     return diff;
   }
 
-  // 分段平滑转头（模拟鼠标自然移动）
   function smoothLook(targetYaw, targetPitch, steps = 6, stepMs = 55, onDone) {
-    if (!isBotReady()) return;
-    const startYaw = bot.entity.yaw;
-    const startPitch = bot.entity.pitch;
+    if (!isBotReady() || !isMovementEnabled()) return;
+    const startYaw = Number(bot.entity.yaw);
+    const startPitch = Number(bot.entity.pitch);
+    if (
+      !Number.isFinite(startYaw) ||
+      !Number.isFinite(startPitch) ||
+      !Number.isFinite(targetYaw) ||
+      !Number.isFinite(targetPitch)
+    ) {
+      return;
+    }
     const dYaw = shortestAngleDelta(startYaw, targetYaw);
     const dPitch = targetPitch - startPitch;
     let step = 0;
@@ -588,9 +590,11 @@ function startBotApp(mineflayer) {
       const jitter = step < steps ? randomFloat(-0.015, 0.015) : 0;
       const yaw = startYaw + dYaw * p + jitter;
       const pitch = Math.max(-1.35, Math.min(1.35, startPitch + dPitch * p));
-      try {
-        Promise.resolve(bot.look(yaw, pitch, false)).catch(() => {});
-      } catch (_) {}
+      if (Number.isFinite(yaw) && Number.isFinite(pitch)) {
+        try {
+          Promise.resolve(bot.look(yaw, pitch, false)).catch(() => {});
+        } catch (_) {}
+      }
 
       if (step < steps) {
         addTimeout(next, Math.max(25, stepMs + randomInt(-15, 25)));
@@ -601,7 +605,6 @@ function startBotApp(mineflayer) {
     next();
   }
 
-  // 轻量地形安全检测（防掉坑、防岩浆、防水）
   function isDirectionSafe(yaw) {
     if (!isBotReady()) return false;
     try {
@@ -623,12 +626,9 @@ function startBotApp(mineflayer) {
     }
   }
 
-  // 锚点有限半径内自然随机走动
   function doRandomWalk() {
-    if (!isBotReady() || isEating) return;
+    if (!isBotReady() || isEating || !isMovementEnabled()) return;
     const moveCfg = (config.behavior && config.behavior.movement) || {};
-    if (moveCfg.enabled === false) return;
-
     const maxRadius = moveCfg.maxRadius || 6;
     const pos = bot.entity.position;
     let targetYaw = null;
@@ -681,9 +681,8 @@ function startBotApp(mineflayer) {
     });
   }
 
-  // 自然注视 8 格内附近玩家或生物
   function lookAtNearbyEntity() {
-    if (!isBotReady()) return false;
+    if (!isBotReady() || !isMovementEnabled()) return false;
     try {
       const pos = bot.entity.position;
       const list = Object.values(bot.entities).filter(
@@ -709,6 +708,7 @@ function startBotApp(mineflayer) {
   }
 
   function startWaterGuard() {
+    if (!isMovementEnabled()) return;
     const check = () => {
       if (!isBotReady()) return;
       try {
@@ -745,8 +745,25 @@ function startBotApp(mineflayer) {
 
   function performRandomAction() {
     if (!isBotReady() || isEating) return;
-    const roll = Math.random();
 
+    // 关闭移动时仅执行不涉及移动/视角包的安全保活动作
+    if (!isMovementEnabled()) {
+      const r = Math.random();
+      if (r < 0.5) {
+        try {
+          const cur = typeof bot.quickBarSlot === "number" ? bot.quickBarSlot : 0;
+          const next = (cur + randomInt(1, 8)) % 9;
+          bot.setQuickBarSlot(next);
+        } catch (_) {}
+      } else if (r < 0.85) {
+        try {
+          bot.swingArm();
+        } catch (_) {}
+      }
+      return;
+    }
+
+    const roll = Math.random();
     if (roll < 0.28) {
       doRandomWalk();
     } else if (roll < 0.5) {
@@ -786,7 +803,6 @@ function startBotApp(mineflayer) {
     }, delay);
   }
 
-  // 定时主动下线并在 2 分钟内重连
   function scheduleSessionLeave() {
     const s = (config.behavior && config.behavior.session) || {};
     if (!s.enabled) return;
@@ -885,13 +901,16 @@ function startBotApp(mineflayer) {
     const version = config.server && config.server.version && config.server.version.trim() !== ""
       ? config.server.version.trim()
       : false;
+    const physicsEnabled = isMovementEnabled();
 
     if (!host) {
       console.log("[Bot] 错误：settings.json 中未填写 server.ip");
       return;
     }
 
-    console.log(`[Bot] 正在连接 ${host}:${port} (玩家: ${config["bot-account"].username})...`);
+    console.log(
+      `[Bot] 正在连接 ${host}:${port} (玩家: ${config["bot-account"].username}, 物理引擎: ${physicsEnabled ? "开" : "关"})...`
+    );
 
     try {
       bot = mineflayer.createBot({
@@ -901,6 +920,7 @@ function startBotApp(mineflayer) {
         host,
         port,
         version,
+        physicsEnabled,
         hideErrors: false,
         checkTimeoutInterval: 600000,
       });
@@ -908,6 +928,29 @@ function startBotApp(mineflayer) {
       console.log(`[Bot] 创建实例失败: ${err.message}`);
       scheduleReconnect();
       return;
+    }
+
+    // 底层拦截：关闭移动时直接丢弃全部移动/视角包；开启移动时过滤 NaN/Infinity/超界包
+    if (bot && bot._client && typeof bot._client.write === "function") {
+      const origWrite = bot._client.write.bind(bot._client);
+      bot._client.write = (name, params) => {
+        if (name === "position" || name === "position_look" || name === "look") {
+          if (!isMovementEnabled()) {
+            return;
+          }
+          if (params && typeof params === "object") {
+            for (const key of ["x", "y", "z", "yaw", "pitch"]) {
+              if (params[key] !== undefined) {
+                const v = Number(params[key]);
+                if (!Number.isFinite(v) || Math.abs(v) > 29999984) {
+                  return;
+                }
+              }
+            }
+          }
+        }
+        return origWrite(name, params);
+      };
     }
 
     let spawnStarted = false;
