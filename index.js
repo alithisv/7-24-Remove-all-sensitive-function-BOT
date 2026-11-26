@@ -803,6 +803,7 @@ function startBotApp(mineflayer) {
     }, delay);
   }
 
+  // 定时主动下线并在 30 秒内重连
   function scheduleSessionLeave() {
     const s = (config.behavior && config.behavior.session) || {};
     if (!s.enabled) return;
@@ -850,8 +851,8 @@ function startBotApp(mineflayer) {
       isPlannedDisconnect = false;
       attempts = 0;
       const s = (config.behavior && config.behavior.session) || {};
-      const minSec = Math.max(10, Math.min(s.minOfflineSec || 35, 110));
-      const maxSec = Math.max(minSec, Math.min(s.maxOfflineSec || 105, 110));
+      const minSec = Math.max(5, Math.min(s.minOfflineSec || 10, 28));
+      const maxSec = Math.max(minSec, Math.min(s.maxOfflineSec || 25, 28));
       const restMs = randomInt(minSec * 1000, maxSec * 1000);
       console.log(`[Session] 计划休息 ${(restMs / 1000).toFixed(0)}s 后重连`);
       addTimeout(() => {
@@ -874,8 +875,8 @@ function startBotApp(mineflayer) {
 
     attempts++;
     const base = (config.utils && config.utils["auto-reconnect-delay"]) || 5000;
-    const max = (config.utils && config.utils["max-reconnect-delay"]) || 60000;
-    const delay = Math.min(base * Math.pow(2, attempts - 1), max) + randomInt(1000, 4000);
+    const max = Math.min((config.utils && config.utils["max-reconnect-delay"]) || 25000, 25000);
+    const delay = Math.min(base * Math.pow(2, attempts - 1), max) + randomInt(1000, 3000);
     console.log(`[Bot] ${(delay / 1000).toFixed(1)}s 后重连 (第 #${attempts} 次)`);
     addTimeout(() => {
       isReconnecting = false;
