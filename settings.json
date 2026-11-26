@@ -14,8 +14,8 @@
       "enabled": true,
       "minOnlineMin": 25,
       "maxOnlineMin": 55,
-      "minOfflineSec": 35,
-      "maxOfflineSec": 105
+      "minOfflineSec": 10,
+      "maxOfflineSec": 25
     },
     "movement": {
       "enabled": false,
@@ -33,6 +33,6 @@
       "password": "YourPassword123"
     },
     "auto-reconnect-delay": 5000,
-    "max-reconnect-delay": 60000
+    "max-reconnect-delay": 25000
   }
 }
